@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # Servidor Jenkins customizado com Docker CLI
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
+    container_name: jenkins_server
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - app-network
+
+  # Banco de dados MySQL exigido no guia
+  db:
+    image: mysql:8.0
+    container_name: mysql_db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: api_db_test
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - app-network
+
+  # API Node.js apontando para a pasta /api
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: node_api
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: db
+      DB_USER: root
+      DB_PASSWORD: rootpassword
+      DB_NAME: api_db_test
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+volumes:
+  jenkins_data:
+  db_data:
+
+networks:
+  app-network:
+    driver: bridge
