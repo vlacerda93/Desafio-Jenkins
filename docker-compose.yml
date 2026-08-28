@@ -7,6 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile.jenkins
     container_name: jenkins_server
+    user: root
     ports:
       - "8080:8080"
       - "50000:50000"
@@ -16,15 +17,18 @@ services:
     networks:
       - app-network
 
-  # Banco de dados MySQL exigido no guia
+  # Banco de dados relacional PostgreSQL para persistência da API
   db:
-    image: mysql:8.0
-    container_name: mysql_db
+    image: postgres:15-alpine
+    container_name: postgres_db
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: api_db_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: rootpassword
+      POSTGRES_DB: api_db_test
+    ports:
+      - "5432:5432"
     volumes:
-      - db_data:/var/lib/mysql
+      - db_data:/var/lib/postgresql/data
     networks:
       - app-network
 
@@ -38,7 +42,8 @@ services:
       - "3000:3000"
     environment:
       DB_HOST: db
-      DB_USER: root
+      DB_PORT: 5432
+      DB_USER: postgres
       DB_PASSWORD: rootpassword
       DB_NAME: api_db_test
     depends_on:
