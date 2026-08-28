@@ -1,0 +1,141 @@
+================================================================================
+           RELATÓRIO TÉCNICO E GUIA PRÁTICO: DESAFIO CI/CD E DEVOPS
+         Orquestração com Docker Compose, Dockerfiles e Jenkins Pipeline
+================================================================================
+
+1. VISÃO GERAL DO PROJETO
+--------------------------------------------------------------------------------
+Este projeto implementa um ecossistema completo de Integração Contínua (CI) e 
+Infraestrutura como Código (IaC), orquestrado com Docker Compose. 
+
+O ambiente é composto por:
+  - Servidor de CI (Jenkins) customizado com suporte a Docker in Docker (DinD);
+  - Banco de Dados Relacional (PostgreSQL);
+  - API Node.js (Express + Jest + Supertest + ESLint);
+  - Esteira Declarativa de CI (Jenkinsfile) com 5 estágios automatizados.
+
+================================================================================
+2. DETALHAMENTO DOS ARQUIVOS E ETAPAS DO DESAFIO
+================================================================================
+
+--------------------------------------------------------------------------------
+A) docker-compose.yml (Orquestração e Infraestrutura)
+--------------------------------------------------------------------------------
+O QUE O DESAFIO PEDIA:
+  - Subir 3 serviços interconectados em uma mesma rede Docker bridge.
+  - Jenkins com portas mapeadas (8080 para interface web e 50000 para agentes),
+    volume persistente para não perder configurações ao reiniciar, e mapeamento
+    do socket do host (/var/run/docker.sock) para permitir controle do Docker.
+  - Banco de dados relacional com credenciais seguras, banco inicial de testes e
+    volume de dados persistente.
+  - API Node.js dependendo da inicialização do banco (depends_on) e recebendo as
+    variáveis de ambiente de conexão (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME).
+
+O QUE O ARQUIVO FAZ:
+  - Define a rede interna 'app-network' para isolamento e comunicação DNS direta
+    entre os containers (a API acessa o banco simplesmente usando 'host: db').
+  - Mapeia os volumes 'jenkins_data' e 'db_data', garantindo que jobs, plugins,
+    histórico de builds e tabelas do banco persistam mesmo após o container cair.
+  - Concede permissão de acesso ao socket Docker para que o Jenkins execute builds
+    de imagens e comandos docker diretamente.
+
+--------------------------------------------------------------------------------
+B) Dockerfile.jenkins (Customização do Servidor de CI)
+--------------------------------------------------------------------------------
+O QUE O DESAFIO PEDIA:
+  - Partir da imagem oficial LTS (jenkins/jenkins:lts).
+  - Alternar temporariamente para usuário 'root' para instalar pacotes de sistema.
+  - Adicionar o repositório oficial da Docker e instalar a CLI (docker-ce-cli).
+  - Retornar ao usuário seguro 'jenkins'.
+
+O QUE O ARQUIVO FAZ:
+  - Instala utilitários essenciais (curl, lsb-release, chave GPG da Docker).
+  - Instala APENAS a linha de comando do Docker (docker-ce-cli), tornando a imagem
+    leve. Como o /var/run/docker.sock é compartilhado via compose, a CLI dentro
+    do Jenkins comanda o próprio motor Docker do host ("Docker outside of Docker").
+
+--------------------------------------------------------------------------------
+C) api/Dockerfile e .dockerignore (Containerização da Aplicação)
+--------------------------------------------------------------------------------
+O QUE O DESAFIO PEDIA:
+  - Imagem base leve (Node Alpine).
+  - Diretório de trabalho padronizado (/app).
+  - Otimização do cache de camadas copiando 'package*.json' antes do código.
+  - Exposição da porta 3000 e comando de inicialização padrão (npm start).
+
+O QUE O ARQUIVO FAZ:
+  - Utiliza 'node:18-alpine' para gerar imagens enxutas e de rápida inicialização.
+  - Aplica boas práticas de cache de camadas do Docker: se o código mudar mas as
+    dependências continuarem iguais, o Docker pula o 'npm install' e usa o cache.
+  - O '.dockerignore' impede que pastas locais pesadas (como node_modules) ou
+    arquivos sensíveis (.env) sejam enviados para o contexto de build da imagem.
+
+--------------------------------------------------------------------------------
+D) api/.eslintrc.json e api/package.json (Qualidade de Código e Testes)
+--------------------------------------------------------------------------------
+O QUE O DESAFIO PEDIA:
+  - Análise estática de código com ESLint definindo ambiente Node e ECMAScript.
+  - Suíte de testes automatizados unitários/integração.
+
+O QUE OS ARQUIVOS FAZEM:
+  - O '.eslintrc.json' define regras de qualidade, variáveis globais do Node/Jest
+    e sintaxe moderna do JavaScript (ES2021+), prevenindo bugs antes do deploy.
+  - O 'package.json' inclui as dependências de produção (express, pg, dotenv) e
+    as ferramentas de automação (eslint, jest, supertest) com os scripts
+    padronizados 'npm run lint' e 'npm test'.
+
+--------------------------------------------------------------------------------
+E) Jenkinsfile (Esteira de Integração Contínua Declarativa)
+--------------------------------------------------------------------------------
+O QUE O DESAFIO PEDIA:
+  - Sintaxe Declarativa com agente dinâmico (agent any).
+  - Gatilho automático de push no repositório (triggers { githubPush() }).
+  - Injeção da ferramenta Node.js (tools { nodejs 'NodeJS' }).
+  - 5 Estágios obrigatórios:
+      1. Checkout: clonagem do código fonte da branch 'main'.
+      2. Build / Instalação: execução automatizada de dependências (npm install).
+      3. SAST (Segurança): auditoria estática de vulnerabilidades (npm audit).
+      4. Lint & Quality: validação do padrão de código (npm run lint).
+      5. Testes: execução de 20 testes unitários cobrindo todos os endpoints CRUD.
+  - Pós-Pipeline (Post):
+      - always: limpeza da área de trabalho (cleanWs()) para não acumular lixo.
+      - success / failure: feedback visual claro com mensagens de status.
+
+O QUE O ARQUIVO FAZ:
+  - Executa cada etapa dentro do diretório 'api' de forma isolada e sequencial.
+  - Se qualquer estágio falhar (ex: código fora do padrão ou teste quebrado), a
+    esteira é imediatamente interrompida, bloqueando a entrega de código com defeito.
+
+================================================================================
+3. COMO TUDO ISSO SE ENCAIXA NO DIA A DIA DE UM ENGENHEIRO DEVOPS
+================================================================================
+
+1. CONCEITO DE "SHIFT-LEFT TESTING" (TESTAR CEDO):
+   No desenvolvimento tradicional, os testes só eram feitos no final do mês ou
+   pela equipe de QA. Com essa esteira automatizada no Jenkins, toda vez que um
+   desenvolvedor abre um Pull Request ou faz um 'git push', o código é testado
+   e auditado em menos de 2 minutos. Qualquer erro é identificado na hora.
+
+2. SEGURANÇA CONTÍNUA (DevSecOps):
+   O estágio de SAST (Static Application Security Testing) garante que nenhuma
+   biblioteca com vulnerabilidades conhecidas (CVEs) seja empacotada para
+   produção sem que a equipe saiba.
+
+3. PADRONIZAÇÃO E QUALIDADE DE CÓDIGO (Linting):
+   Em times com dezenas de desenvolvedores, o ESLint na pipeline garante que
+   todo o código siga o mesmo padrão de formatação, evitando variáveis órfãs,
+   má utilização de memória e regras quebradas.
+
+4. AMBIENTES IDÊNTICOS E REPRODUTÍVEIS (Docker & IaC):
+   Como tudo está em Dockerfiles e no docker-compose.yml, o ambiente em que o
+   Jenkins testa é EXATAMENTE o mesmo ambiente em que a aplicação roda em
+   produção. O clássico problema "na minha máquina funciona" é 100% eliminado.
+
+5. MANUTENÇÃO E HIGIENE DE INFRAESTRUTURA:
+   O comando 'cleanWs()' no bloco post do Jenkins evita que os agentes de CI
+   lotem o disco com gigabytes de workspaces antigos, mantendo a saúde do
+   cluster de servidores estável.
+
+================================================================================
+                              FIM DO RELATÓRIO
+================================================================================
